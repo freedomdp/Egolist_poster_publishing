@@ -8,6 +8,7 @@ from core.google_sheets_handler import get_events_from_sheet
 from utils.config_handler import load_config
 from utils.logger import logger
 from models.sheet_event import SheetEvent
+from core.event_processor import process_events
 
 class WorkerThread(QThread):
     update_log = pyqtSignal(str)
@@ -55,7 +56,16 @@ class WorkerThread(QThread):
             self.update_counters.emit(len(sheet_events), 0, len(site_events))
             self.update_table.emit(0, sheet_events)
 
-            # Здесь можно добавить дополнительную логику для сравнения или обработки данных
+            self.update_log.emit("Получение данных из Google Sheets...")
+            sheet_events = get_events_from_sheet()
+            self.update_log.emit(f"Получено {len(sheet_events)} событий из Google Sheets")
+
+            self.update_log.emit("Обработка событий...")
+            result = process_events(site_events, sheet_events)
+
+            self.update_log.emit(f"Найдено дубликатов: {len(result['duplicates'])}")
+            self.update_log.emit(f"Найдено устаревших событий: {len(result['old_events'])}")
+            self.update_log.emit(f"Найдено новых событий для публикации: {len(result['new_events'])}")
 
         except Exception as e:
             error_msg = f"Произошла ошибка: {str(e)}\n{traceback.format_exc()}"
