@@ -14,17 +14,21 @@ class WorkerThread(QThread):
     update_counters = pyqtSignal(int, int, int)
     update_table = pyqtSignal(int, list)
 
-
     def run(self):
         automation = None
         try:
-            # 1. Авторизация на сайте
             self.update_log.emit("Начало процесса авторизации на сайте...")
             logger.info("Начало процесса авторизации на сайте")
 
             config = load_config()
             automation = SeleniumAutomation()
-            automation.perform_login(config['LOGIN_URL'], config['LOGIN_EMAIL'], config['LOGIN_PASSWORD'])
+
+            try:
+                automation.perform_login(config['LOGIN_URL'], config['LOGIN_EMAIL'], config['LOGIN_PASSWORD'])
+            except Exception as e:
+                self.update_log.emit(f"Ошибка при запуске браузера или входе в систему: {str(e)}")
+                logger.error(f"Ошибка при запуске браузера или входе в систему: {str(e)}")
+                return
 
             self.update_log.emit("Авторизация выполнена успешно")
             logger.info("Авторизация выполнена успешно")
