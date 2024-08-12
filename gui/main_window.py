@@ -4,33 +4,54 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from core.selenium_automation import SeleniumAutomation
 from core.parsing import parse_events
+from core.google_sheets_handler import get_events_from_sheet
 from utils.config_handler import load_config
 from utils.logger import logger
+from models.sheet_event import SheetEvent
 
 class WorkerThread(QThread):
     update_log = pyqtSignal(str)
     update_counters = pyqtSignal(int, int, int)
     update_table = pyqtSignal(int, list)
 
+
     def run(self):
         automation = None
         try:
-            self.update_log.emit("Начало процесса входа...")
-            logger.info("Начало процесса входа")
+            # 1. Авторизация на сайте
+            self.update_log.emit("Начало процесса авторизации на сайте...")
+            logger.info("Начало процесса авторизации на сайте")
 
             config = load_config()
             automation = SeleniumAutomation()
             automation.perform_login(config['LOGIN_URL'], config['LOGIN_EMAIL'], config['LOGIN_PASSWORD'])
 
-            self.update_log.emit("Вход выполнен успешно, начинаем парсинг...")
-            logger.info("Вход выполнен успешно, начинаем парсинг")
+            self.update_log.emit("Авторизация выполнена успешно")
+            logger.info("Авторизация выполнена успешно")
 
-            events = parse_events(automation.driver,
-                                  lambda count: self.update_counters.emit(0, 0, count),
-                                  lambda page, page_events: self.update_table.emit(page, page_events))
+            # 2. Парсинг афиш с сайта admin.egolist.ua
+            self.update_log.emit("Начало парсинга афиш с сайта...")
+            logger.info("Начало парсинга афиш с сайта")
 
-            self.update_log.emit(f"Парсинг завершен. Всего найдено событий: {len(events)}")
-            logger.info(f"Парсинг завершен. Всего найдено событий: {len(events)}")
+            site_events = parse_events(automation.driver,
+                                       lambda count: self.update_counters.emit(0, 0, count),
+                                       lambda page, page_events: self.update_table.emit(page, page_events))
+
+            self.update_log.emit(f"Парсинг завершен. Всего найдено событий на сайте: {len(site_events)}")
+            logger.info(f"Парсинг завершен. Всего найдено событий на сайте: {len(site_events)}")
+
+            # 3. Получение данных из гугл таблицы
+            self.update_log.emit("Начало получения данных из Google таблицы...")
+            logger.info("Начало получения данных из Google таблицы")
+
+            sheet_events = get_events_from_sheet()
+            self.update_log.emit(f"Получено {len(sheet_events)} событий из Google таблицы")
+            logger.info(f"Получено {len(sheet_events)} событий из Google таблицы")
+
+            self.update_counters.emit(len(sheet_events), 0, len(site_events))
+            self.update_table.emit(0, sheet_events)
+
+            # Здесь можно добавить дополнительную логику для сравнения или обработки данных
 
         except Exception as e:
             error_msg = f"Произошла ошибка: {str(e)}\n{traceback.format_exc()}"
@@ -97,6 +118,7 @@ class MainWindow(QMainWindow):
         self.start_button.setEnabled(False)
         self.log_output.clear()
         self.update_log("Запуск процесса...")
+        self.update_counters(0, 0, 0)  # Очищаем счетчики
         self.worker_thread.start()
 
     def update_log(self, message):
@@ -107,9 +129,14 @@ class MainWindow(QMainWindow):
         self.parser_counter.setText(f"Афиши на сайте: {on_site}")
 
     def update_table(self, page, events):
-        self.log_output.append(f"\nСтраница {page}")
+        if isinstance(events[0], SheetEvent):
+            self.log_output.append("\nСобытия из Google таблицы:")
+            self.total_events = 0  # Сбрасываем счетчик для событий из таблицы
+        else:
+            self.log_output.append(f"\nСтраница {page} событий с сайта:")
+
         self.log_output.append(
-            f"| {'№':3} | {'Название                 ':25} | {'Место          ':15} | {'Дата      ':10} | {'Время':5} | {'Тип            ':15} |"
+            f"| {'№':3} | {'Название':25} | {'Место':15} | {'Дата':10} | {'Время':5} | {'Тип':15} |"
         )
         self.log_output.append(
             "--------------------------------------------------------------------------------------"
